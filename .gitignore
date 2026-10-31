@@ -1,0 +1,8 @@
+# Your own settings and recordings
+settings.ini
+GIFs/
+*.gif
+
+# The built program goes in a Release download, not the source
+*.exe
+*.zip
