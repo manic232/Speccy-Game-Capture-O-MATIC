@@ -23,7 +23,8 @@ and unzip it into any folder. There's no installer.
    way. When the status dot turns green, the preview shows exactly what will be recorded.
 3. Play. Press **F8** to start recording and **F8** again to stop. This works while the
    emulator has focus, so you don't need to switch windows. You'll hear a rising beep
-   on start and a falling beep on stop.
+   on start and a falling beep on stop. Changed your mind? **Cancel recording** (next to
+   the recording time) stops and throws the clip away without asking.
 4. The **trim window** opens (see below). Choose the part to keep and click **Save GIF**.
 5. The GIF is saved to the `GIFs` folder next to the app as `<game name>_<date>_<time>.gif`.
    Use **Open GIF** or **Show in folder** to find it.
@@ -46,6 +47,14 @@ which one **Launch a game…** uses. The status line says which one is connected
 - **Border.** Fuse only draws 32 pixels of border at the sides and 24 above and below, so
   with Fuse the larger border settings give Fuse's whole border (320 × 240) and no more.
 
+### Window size
+
+Drag the window's edges (or maximise it) to make it bigger or smaller. The preview grows
+or shrinks to fill the space, keeping the Spectrum's shape, and the path boxes stretch.
+At its smallest, the preview shows the picture at its real size. The app remembers the
+window's size and position, and whether it was maximised, for next time. If the screen
+it was on is no longer connected, it opens in the middle of the main screen instead.
+
 ### Portable
 
 Everything stays in the app's own folder. Nothing goes in the registry or AppData.
@@ -65,19 +74,39 @@ bits off the start and end.
 
 - **Drag the blue handles** on the timeline to set the start and end. Grey parts are cut.
 - **Click anywhere on the timeline** to view that frame. The red marker is the playhead.
+- **Fine-tune with the arrow keys.** Click a handle (or press Tab) and it gets an outline.
+  ← and → then move that handle one frame at a time, and the preview shows the frame
+  at the cut. Press Esc to go back to moving the playhead.
 - **Play** loops the kept section, just as the finished GIF will.
 
 | Key | Action |
 |---|---|
 | Space | Play / pause |
-| ← / → | Step one frame (hold Shift for one second) |
-| [ / ] | Set the start / end at the playhead |
+| ← / → | Move the playhead, or the selected handle, one frame (hold Shift for one second) |
+| Tab | Switch between the playhead, the start handle and the end handle |
+| Esc | Back to moving the playhead |
+| [ / ] | Set the start / end at the playhead (and select that handle) |
 | Home / End | Jump to the start / end |
 | Enter | Save GIF |
 
 **Keep everything** resets the handles. **Discard recording** throws the clip away
 after asking you to confirm. To skip this step and save straight away, untick
 **Trim before saving**.
+
+#### Trimming a GIF you've already saved
+
+Forgot to trim, or want a shorter version? Click **Trim** next to the GIF you just saved,
+or **Trim a saved GIF…** to pick any GIF made by this app. It opens in the trim window,
+and when you're done:
+
+- **Replace original** saves over it. The old file goes to the Recycle Bin, so you can
+  get it back. If the GIF is open in another program and can't be replaced, the trimmed
+  version is saved as a copy instead.
+- **Save as new GIF** keeps the original and saves `<name>_trimmed.gif` next to it.
+
+The GIF keeps its own size, frame rate, colours and loop setting, whatever the
+current settings are. Only GIFs made by this app can be opened, because the app
+needs to know their Spectrum resolution and colours.
 
 ### Settings
 
@@ -144,6 +173,7 @@ build.cmd
 - `src/FuseReader.cs`: finds and reads Fuse's finished picture and frame counter
 - `src/CaptureEngine.cs`: background capture thread, Spectrum screen and border rendering, recording
 - `src/GifWriter.cs`: animated GIF encoder (LZW, changed-area frames, transparency, trimming)
+- `src/GifReader.cs`: reads a saved GIF back in so it can be trimmed again
 - `src/TrimForm.cs`: the trim window and timeline
 - `src/Theme.cs`: light/dark colour schemes, themed drop-downs, progress bar and prompts
 - `src/MainForm.cs`: the main window, preview and hotkey

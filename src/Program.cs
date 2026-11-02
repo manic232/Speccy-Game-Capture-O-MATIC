@@ -15,7 +15,7 @@ namespace SpeccyCapture
     static class Program
     {
         // The version shown in the title bar and in the .exe's file properties. Change it here only.
-        public const string Version = "1.0";
+        public const string Version = "1.1";
 
         [STAThread]
         static void Main()

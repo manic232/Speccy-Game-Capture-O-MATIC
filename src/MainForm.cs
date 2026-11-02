@@ -16,6 +16,7 @@ namespace SpeccyCapture
         const string AppName = "Speccy Game Capture O-MATIC";
         const string WindowTitle = AppName + " v" + Program.Version;
         const int HotkeyId = 0x5150;
+        const int HintWidth = 170; // notes right of the settings wrap onto a second line beyond this
 
         // Spectaculator already uses F1-F6, F9-F12, Pause and Insert, so these are kept clear of them.
         // (Fuse uses F7 and F8 for its tape controls; a warning is shown if those clash.)
@@ -42,11 +43,14 @@ namespace SpeccyCapture
         PreviewPanel preview;
         Label statusDot, statusLabel, recordLabel, savedLabel, hotkeyWarning, sizeHint;
         Button launchButton, recordButton;
-        LinkLabel openLink, folderLink;
+        LinkLabel openLink, trimLink, folderLink, trimSavedLink, cancelLink;
         ThinProgress saveProgress;
         ComboBox themeBox;
         bool recordLabelActive;
-        TextBox emuPathBox, saveFolderBox;
+        FieldBox emuPathBox, saveFolderBox;
+        TableLayoutPanel settingsGrid, rootPanel;
+        bool resizable; // true once the preview follows the window size
+        readonly List<Button> rowButtons = new List<Button>();
         ComboBox emulatorBox;
         Label emulatorHint;
         int[] previewPalette = Speccy.Palette;
@@ -74,6 +78,7 @@ namespace SpeccyCapture
             BuildUi();
             LoadSettingsIntoUi();
             Theme.Apply(this);
+            AlignSettingsRows();
             UpdateRecordButton();
             Theme.Changed += OnThemeChanged;
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnWindowsSettingsChanged;
@@ -91,19 +96,22 @@ namespace SpeccyCapture
             AutoScaleMode = AutoScaleMode.Dpi;
             Font = new Font("Segoe UI", 9F);
             Text = WindowTitle;
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
+            // The window first sizes itself to its contents (preview at 2x), which gives the
+            // default size; MakeResizable then lets the preview follow the window instead.
+            FormBorderStyle = FormBorderStyle.Sizable;
             AutoSize = true;
             AutoSizeMode = AutoSizeMode.GrowAndShrink;
-            StartPosition = FormStartPosition.CenterScreen;
+            StartPosition = FormStartPosition.Manual;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             var root = new TableLayoutPanel();
             root.ColumnCount = 1;
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             root.AutoSize = true;
             root.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             root.Padding = new Padding(12);
             root.Location = new Point(0, 0);
+            rootPanel = root;
 
             // Status line
             var statusRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 6) };
@@ -129,20 +137,35 @@ namespace SpeccyCapture
             buttons.Controls.Add(recordButton, 1, 0);
             root.Controls.Add(buttons);
 
+            // Right-hand link: "Trim a saved GIF…" normally, "Cancel recording" while recording.
+            var recordRow = new TableLayoutPanel { ColumnCount = 3, AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 12) }; // a line's space below
+            recordRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            recordRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            recordRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             recordLabel = new Label { Tag = "custom", AutoSize = true, Margin = new Padding(0, 8, 0, 0), Text = "Not recording" };
-            root.Controls.Add(recordLabel);
+            trimSavedLink = new LinkLabel { Text = "Trim a saved GIF…", AutoSize = true, Margin = new Padding(8, 8, 0, 0) };
+            trimSavedLink.LinkClicked += delegate { TrimSavedGif(null); };
+            cancelLink = new LinkLabel { Text = "Cancel recording", AutoSize = true, Visible = false, Margin = new Padding(8, 8, 0, 0) };
+            cancelLink.LinkClicked += delegate { CancelRecording(); };
+            recordRow.Controls.Add(recordLabel, 0, 0);
+            recordRow.Controls.Add(trimSavedLink, 1, 0);
+            recordRow.Controls.Add(cancelLink, 2, 0);
+            root.Controls.Add(recordRow);
 
-            saveProgress = new ThinProgress { Width = 512, Height = 6, Visible = false, Margin = new Padding(0, 6, 0, 0) };
+            saveProgress = new ThinProgress { Width = 512, Height = 6, Visible = false, Dock = DockStyle.Fill, Margin = new Padding(0, 6, 0, 0) };
             root.Controls.Add(saveProgress);
 
             var savedRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 4, 0, 4) };
-            savedLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 8, 0), MaximumSize = new Size(380, 0) };
+            savedLabel = new Label { AutoSize = true, Margin = new Padding(0, 0, 8, 0), MaximumSize = new Size(330, 0) };
             openLink = new LinkLabel { Text = "Open GIF", AutoSize = true, Visible = false, Margin = new Padding(0, 0, 8, 0) };
             openLink.LinkClicked += delegate { OpenPath(lastSavedPath); };
+            trimLink = new LinkLabel { Text = "Trim", AutoSize = true, Visible = false, Margin = new Padding(0, 0, 8, 0) };
+            trimLink.LinkClicked += delegate { TrimSavedGif(lastSavedPath); };
             folderLink = new LinkLabel { Text = "Show in folder", AutoSize = true, Visible = false };
             folderLink.LinkClicked += delegate { ShowInFolder(lastSavedPath); };
             savedRow.Controls.Add(savedLabel);
             savedRow.Controls.Add(openLink);
+            savedRow.Controls.Add(trimLink);
             savedRow.Controls.Add(folderLink);
             root.Controls.Add(savedRow);
 
@@ -167,21 +190,21 @@ namespace SpeccyCapture
                 UpdateSizeHint();
                 UpdateHotkeyWarning();
             };
-            emulatorHint = new Label { Tag = "dim", AutoSize = true, Margin = new Padding(6, 6, 0, 0), Text = "for Launch a game" };
+            emulatorHint = new Label { Tag = "dim", AutoSize = true, MaximumSize = new Size(HintWidth, 0), Margin = new Padding(6, 0, 0, 0), Text = "for Launch a game" };
             AddRow(grid, 0, "Emulator:", emulatorBox, emulatorHint);
 
-            emuPathBox = new TextBox { Dock = DockStyle.Fill, Width = 300 };
-            emuPathBox.Leave += delegate { StoreEmulatorPath(); settings.Save(); };
-            var emuBrowse = new Button { Text = "Browse…", AutoSize = true };
+            emuPathBox = new FieldBox { Anchor = AnchorStyles.Left | AnchorStyles.Right, Width = 300 };
+            emuPathBox.Box.Leave += delegate { StoreEmulatorPath(); settings.Save(); };
+            var emuBrowse = MakeRowButton("Browse…");
             emuBrowse.Click += delegate { BrowseEmulator(); };
             AddRow(grid, 1, "Emulator path:", emuPathBox, emuBrowse);
 
-            saveFolderBox = new TextBox { Dock = DockStyle.Fill, Width = 300 };
-            saveFolderBox.Leave += delegate { settings.SaveFolder = saveFolderBox.Text.Trim(); settings.Save(); };
+            saveFolderBox = new FieldBox { Anchor = AnchorStyles.Left | AnchorStyles.Right, Width = 300 };
+            saveFolderBox.Box.Leave += delegate { settings.SaveFolder = saveFolderBox.Text.Trim(); settings.Save(); };
             var folderButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            var folderBrowse = new Button { Text = "Browse…", AutoSize = true };
+            var folderBrowse = MakeRowButton("Browse…");
             folderBrowse.Click += delegate { BrowseSaveFolder(); };
-            var folderOpen = new Button { Text = "Open", AutoSize = true };
+            var folderOpen = MakeRowButton("Open");
             folderOpen.Click += delegate { Directory.CreateDirectory(settings.SaveFolder); OpenPath(settings.SaveFolder); };
             folderButtons.Controls.Add(folderBrowse);
             folderButtons.Controls.Add(folderOpen);
@@ -189,7 +212,7 @@ namespace SpeccyCapture
 
             hotkeyBox = MakeCombo(HotkeyNames);
             hotkeyBox.SelectedIndexChanged += delegate { settings.Hotkey = HotkeyNames[Math.Max(0, hotkeyBox.SelectedIndex)]; settings.Save(); RegisterHotkey(); UpdateRecordButton(); };
-            hotkeyWarning = new Label { Tag = "warning", AutoSize = true, Margin = new Padding(6, 6, 0, 0) };
+            hotkeyWarning = new Label { Tag = "warning", AutoSize = true, MaximumSize = new Size(HintWidth, 0), Margin = new Padding(6, 0, 0, 0) };
             AddRow(grid, 3, "Start/stop key:", hotkeyBox, hotkeyWarning);
 
             borderBox = MakeCombo(BorderNames);
@@ -204,7 +227,7 @@ namespace SpeccyCapture
 
             sizeBox = MakeCombo(SizeNames);
             sizeBox.SelectedIndexChanged += delegate { settings.Scale = sizeBox.SelectedIndex + 1; settings.Save(); UpdateSizeHint(); };
-            sizeHint = new Label { Tag = "dim", AutoSize = true, Margin = new Padding(6, 6, 0, 0) };
+            sizeHint = new Label { Tag = "dim", AutoSize = true, MaximumSize = new Size(HintWidth, 0), Margin = new Padding(6, 0, 0, 0) };
             AddRow(grid, 5, "GIF size:", sizeBox, sizeHint);
 
             rateBox = MakeCombo(RateNames);
@@ -236,6 +259,13 @@ namespace SpeccyCapture
             grid.Controls.Add(checks, 0, 8);
             grid.SetColumnSpan(checks, 3);
 
+            // Every settings row gets the same height (set properly in AlignSettingsRows), with
+            // its controls centred in it, so the gaps between the boxes are all equal.
+            grid.RowCount = 9;
+            for (int i = 0; i < 8; i++) grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+            grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            settingsGrid = grid;
+
             root.Controls.Add(grid);
 
             Controls.Add(root);
@@ -249,11 +279,48 @@ namespace SpeccyCapture
             return c;
         }
 
+        Button MakeRowButton(string text)
+        {
+            var b = new Button { Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(6, 0, 6, 0) };
+            rowButtons.Add(b);
+            return b;
+        }
+
+        // Controls are anchored left only (not top or bottom), so they sit centred in the row.
         static void AddRow(TableLayoutPanel grid, int row, string label, Control main, Control extra)
         {
-            grid.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 6, 6, 0) }, 0, row);
+            grid.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 0, 6, 0) }, 0, row);
             grid.Controls.Add(main, 1, row);
-            if (extra != null) grid.Controls.Add(extra, 2, row);
+            if (extra != null)
+            {
+                extra.Anchor = AnchorStyles.Left;
+                grid.Controls.Add(extra, 2, row);
+            }
+        }
+
+        // Text fields and buttons take the drop-downs' height (which follows the font and screen
+        // scaling), and every row gets the same height with an equal gap between boxes.
+        void AlignSettingsRows()
+        {
+            int h = emulatorBox.Height;
+            emuPathBox.Height = h;
+            saveFolderBox.Height = h;
+            foreach (Button b in rowButtons) b.MinimumSize = new Size(0, h);
+            int rowHeight = h + (int)Math.Round(h * 0.3);
+            for (int i = 0; i < 8; i++) settingsGrid.RowStyles[i].Height = rowHeight;
+            settingsGrid.PerformLayout();
+
+            // The grid centres drop-downs by a shorter height than they're drawn at, which leaves
+            // them a couple of pixels low. Once they exist, measure that and even it out with margins.
+            if (emulatorBox.IsHandleCreated)
+            {
+                Padding m = emulatorBox.Margin;
+                int low = emulatorBox.Top - (rowHeight - h) / 2 - (m.Top - m.Bottom) / 2; // safe to run again
+                low = Math.Max(-3, Math.Min(3, low));
+                foreach (Control c in settingsGrid.Controls)
+                    if (c is ComboBox) c.Margin = new Padding(m.Left, 3 - low, m.Right, 3 + low);
+                settingsGrid.PerformLayout();
+            }
         }
 
         void LoadSettingsIntoUi()
@@ -387,6 +454,7 @@ namespace SpeccyCapture
             }
             StoreEmulatorPath();
             settings.SaveFolder = saveFolderBox.Text.Trim();
+            RememberWindowPlacement();
             settings.Save();
             uiTimer.Stop();
             if (hotkeyRegistered) Native.UnregisterHotKey(Handle, HotkeyId);
@@ -457,34 +525,18 @@ namespace SpeccyCapture
             }
 
             long start = 0, end = rec.TotalFrames;
+            bool replace;
             if (settings.TrimBeforeSaving)
             {
                 string title = engine.GameName.Length > 0 ? engine.GameName : "Spectrum";
-                trimming = true;
-                try
+                if (!ShowTrim(rec, title, false, out start, out end, out replace))
                 {
-                    using (var trim = new TrimForm(rec, title))
-                    {
-                        trim.TopMost = TopMost;
-                        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
-                        Activate();
-                        if (trim.ShowDialog(this) != DialogResult.OK)
-                        {
-                            savedLabel.Text = "Recording discarded.";
-                            openLink.Visible = folderLink.Visible = false;
-                            return;
-                        }
-                        start = trim.TrimStart;
-                        end = trim.TrimEnd;
-                    }
-                }
-                finally
-                {
-                    trimming = false;
+                    savedLabel.Text = "Recording discarded.";
+                    ShowSavedLinks(false);
+                    return;
                 }
             }
 
-            long totalFrames = end - start;
             string path;
             try
             {
@@ -495,21 +547,127 @@ namespace SpeccyCapture
                 ThemedDialog.Error(this, AppName, "Can't use the save folder: " + ex.Message);
                 return;
             }
+            StartSave(rec, start, end, path, settings.FrameStep, settings.Scale, settings.Loop, false);
+        }
 
-            int step = settings.FrameStep, scale = settings.Scale;
-            bool loop = settings.Loop;
+        // Stops recording and throws the clip away, without saving or asking.
+        void CancelRecording()
+        {
+            if (!engine.IsRecording) return;
+            engine.StopRecording();
+            borderBox.Enabled = true;
+            if (settings.Sounds) Beep(false);
+            UpdateRecordButton();
+            savedLabel.Text = "Recording cancelled. Nothing was saved.";
+            ShowSavedLinks(false);
+        }
+
+        // Shows the trim window. Returns false if it was cancelled or the recording discarded.
+        bool ShowTrim(Recording rec, string title, bool savedGif, out long start, out long end, out bool replace)
+        {
+            start = 0;
+            end = rec.TotalFrames;
+            replace = false;
+            trimming = true;
+            try
+            {
+                using (var trim = new TrimForm(rec, title, savedGif))
+                {
+                    trim.TopMost = TopMost;
+                    if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+                    Activate();
+                    if (trim.ShowDialog(this) != DialogResult.OK) return false;
+                    start = trim.TrimStart;
+                    end = trim.TrimEnd;
+                    replace = trim.ReplaceOriginal;
+                    return true;
+                }
+            }
+            finally
+            {
+                trimming = false;
+            }
+        }
+
+        // Opens a GIF saved earlier in the trim window (path null = ask which one), then saves
+        // the trimmed version as a new file or in place of the original.
+        void TrimSavedGif(string path)
+        {
+            if (engine.IsRecording)
+            {
+                ThemedDialog.Error(this, AppName, "Stop recording before trimming a saved GIF.");
+                return;
+            }
+            if (path == null)
+            {
+                using (var dlg = new OpenFileDialog())
+                {
+                    dlg.Title = "Choose a GIF to trim";
+                    dlg.Filter = "GIF images|*.gif";
+                    string folder = saveFolderBox.Text.Trim();
+                    if (folder.Length == 0) folder = settings.SaveFolder;
+                    if (Directory.Exists(folder)) dlg.InitialDirectory = folder;
+                    if (dlg.ShowDialog(this) != DialogResult.OK) return;
+                    path = dlg.FileName;
+                }
+            }
+
+            Recording rec;
+            int scale;
+            bool loop;
+            Cursor = Cursors.WaitCursor;
+            try
+            {
+                rec = GifReader.Load(path, out scale, out loop);
+            }
+            catch (GifReadException ex)
+            {
+                Cursor = Cursors.Default;
+                ThemedDialog.Error(this, AppName, Path.GetFileName(path) + ": " + ex.Message);
+                return;
+            }
+            catch (Exception ex)
+            {
+                Cursor = Cursors.Default;
+                ThemedDialog.Error(this, AppName, "Couldn't open the GIF: " + ex.Message);
+                return;
+            }
+            Cursor = Cursors.Default;
+
+            long start, end;
+            bool replace;
+            if (!ShowTrim(rec, Path.GetFileName(path), true, out start, out end, out replace)) return;
+            if (replace && start == 0 && end == rec.TotalFrames)
+            {
+                savedLabel.Text = "Nothing was cut, so " + Path.GetFileName(path) + " was left as it was.";
+                return;
+            }
+
+            // Saved again at its own size, timing and loop setting. Frames already carry their
+            // own lengths, so every emulator frame is kept (step 1) to reproduce the timing exactly.
+            StartSave(rec, start, end, replace ? path : MakeCopyPath(path), 1, scale, loop, replace);
+        }
+
+        // Writes the GIF on a background thread. When replacing, the new GIF is written next to
+        // the original first, and the original only goes to the Recycle Bin once that worked.
+        void StartSave(Recording rec, long start, long end, string path, int step, int scale, bool loop, bool replacing)
+        {
+            long totalFrames = end - start;
+            string written = replacing
+                ? Path.Combine(Path.GetDirectoryName(path), Path.GetFileNameWithoutExtension(path) + ".trimming.tmp")
+                : path;
             savesInProgress++;
             saveProgress.Value = 0;
             saveProgress.Visible = true;
             savedLabel.Text = "Saving " + Path.GetFileName(path) + "…";
-            openLink.Visible = folderLink.Visible = false;
+            ShowSavedLinks(false);
 
             var worker = new Thread(delegate ()
             {
                 Exception error = null;
                 try
                 {
-                    GifWriter.Save(path, rec, start, end, step, scale, loop, delegate (int done, int total)
+                    GifWriter.Save(written, rec, start, end, step, scale, loop, delegate (int done, int total)
                     {
                         SafeInvoke(delegate { if (total > 0) saveProgress.Value = Math.Min(100, done * 100 / total); });
                     });
@@ -518,25 +676,75 @@ namespace SpeccyCapture
                 {
                     error = ex;
                 }
-                SafeInvoke(delegate { SaveFinished(path, totalFrames, error); });
+                SafeInvoke(delegate { SaveFinished(path, written, totalFrames, error); });
             });
             worker.IsBackground = false; // let a save finish even if the window is closed
             worker.Start();
         }
 
-        void SaveFinished(string path, long frames, Exception error)
+        void SaveFinished(string path, string written, long frames, Exception error)
         {
             savesInProgress--;
             saveProgress.Visible = savesInProgress > 0;
             if (error != null)
             {
                 savedLabel.Text = "Couldn't save the GIF: " + error.Message;
+                if (written != path) try { File.Delete(written); } catch { }
                 return;
             }
+
+            string done = "Saved";
+            if (written != path)
+            {
+                try
+                {
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(path,
+                        Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs,
+                        Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    File.Move(written, path);
+                    done = "Replaced";
+                }
+                catch (Exception ex)
+                {
+                    // Probably open in another program. Keep the trimmed GIF as a copy instead.
+                    string copy = MakeCopyPath(path);
+                    try
+                    {
+                        File.Move(written, copy);
+                    }
+                    catch
+                    {
+                        savedLabel.Text = "Couldn't replace the GIF: " + ex.Message;
+                        return;
+                    }
+                    path = copy;
+                    done = "Couldn't replace the original (" + ex.Message.TrimEnd('.') + "), so saved";
+                }
+            }
+
             lastSavedPath = path;
             long bytes = new FileInfo(path).Length;
-            savedLabel.Text = string.Format("Saved {0}  ({1}, {2:F1} s)", Path.GetFileName(path), FormatBytes(bytes), frames * Speccy.FrameMs / 1000.0);
-            openLink.Visible = folderLink.Visible = true;
+            savedLabel.Text = string.Format("{0} {1}  ({2}, {3:F1} s)", done, Path.GetFileName(path), FormatBytes(bytes), frames * Speccy.FrameMs / 1000.0);
+            ShowSavedLinks(true);
+        }
+
+        void ShowSavedLinks(bool visible)
+        {
+            // One at a time, left to right: when hidden links first appear, WinForms can
+            // otherwise shuffle their order in the row.
+            openLink.Visible = visible;
+            trimLink.Visible = visible;
+            folderLink.Visible = visible;
+        }
+
+        // name.gif -> name_trimmed.gif (or _trimmed_2, _3 ... if that's taken).
+        static string MakeCopyPath(string original)
+        {
+            string folder = Path.GetDirectoryName(original);
+            string name = Path.GetFileNameWithoutExtension(original) + "_trimmed";
+            string path = Path.Combine(folder, name + ".gif");
+            for (int i = 2; File.Exists(path); i++) path = Path.Combine(folder, name + "_" + i + ".gif");
+            return path;
         }
 
         string MakeOutputPath()
@@ -638,8 +846,8 @@ namespace SpeccyCapture
             }
         }
 
-        // The preview is always shown at 2x, so it grows or shrinks when the border changes.
-        // It's rebuilt too when the emulator (and so the palette) changes.
+        // The preview bitmap is rebuilt when the picture size (border) or the emulator (and so
+        // the palette) changes. The preview panel scales it to fit, keeping its shape.
         void ResizePreview(int width, int height, int[] palette)
         {
             Bitmap old = previewBitmap;
@@ -649,7 +857,8 @@ namespace SpeccyCapture
             old.Dispose();
             previewWidth = width;
             previewHeight = height;
-            SizePreview();
+            if (!resizable) SizePreview();
+            preview.Invalidate();
         }
 
         void SizePreview()
@@ -662,11 +871,114 @@ namespace SpeccyCapture
         {
             base.OnLoad(e);
             SizePreview(); // the first layout pass can shrink it, so set it once the window exists
+            // Drop-downs only reach their real height once their window exists, so centre the rows again.
+            AlignSettingsRows();
+            MakeResizable();
+        }
+
+        // Switches from "window fits its contents" to "preview fills whatever space the window
+        // gives it", sets the smallest allowed size, and puts the window where it was last time.
+        void MakeResizable()
+        {
+            float dpi = CurrentAutoScaleDimensions.Width / 96f;
+            Size client = ClientSize; // contents with the preview at 2x: the default size
+
+            // Smallest: the preview at 1x, and wide enough for the settings at their widest.
+            string hint = sizeHint.Text, warning = hotkeyWarning.Text;
+            sizeHint.Text = "GIF will be 1280 × 960  (Fuse's full border)";
+            hotkeyWarning.Text = "Takes over Fuse's F8 (play tape)";
+            int settingsWidth = settingsGrid.GetPreferredSize(Size.Empty).Width;
+            sizeHint.Text = hint;
+            hotkeyWarning.Text = warning;
+            int minWidth = Math.Max(settingsWidth, (int)Math.Round(previewWidth * dpi)) + rootPanel.Padding.Horizontal;
+            int minHeight = client.Height - preview.Height + (int)Math.Round(previewHeight * dpi);
+
+            // Rebuild the layout with docking: status line at the top, buttons and settings in one
+            // panel at the bottom, and the preview filling whatever is left between them.
+            // (A table with a percentage row for the preview won't shrink it reliably.)
+            SuspendLayout();
+            AutoSize = false;
+            // Windows Forms blocks dragging the edges of a GrowAndShrink window even when
+            // AutoSize is off, so this has to change too.
+            AutoSizeMode = AutoSizeMode.GrowOnly;
+            Color back = Theme.Current.Back;
+            var frame = new Panel { Dock = DockStyle.Fill, Padding = rootPanel.Padding, BackColor = back };
+            var lower = new TableLayoutPanel
+            {
+                ColumnCount = 1, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Dock = DockStyle.Bottom,
+                Margin = new Padding(0), Padding = new Padding(0, preview.Margin.Bottom, 0, 0), BackColor = back,
+            };
+            lower.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var rows = new List<Control>();
+            foreach (Control c in rootPanel.Controls) rows.Add(c);
+            Control status = rows[0];
+            foreach (Control c in rows.GetRange(rows.IndexOf(preview) + 1, rows.Count - rows.IndexOf(preview) - 1))
+                lower.Controls.Add(c);
+            status.Padding = new Padding(0, 0, 0, status.Margin.Bottom);
+            status.Dock = DockStyle.Top;
+            preview.Dock = DockStyle.Fill;
+            frame.Controls.Add(preview);
+            frame.Controls.Add(lower);
+            frame.Controls.Add(status);
+            preview.BringToFront(); // docked last, so it gets the space that's left
+            Controls.Remove(rootPanel);
+            rootPanel.Dispose();
+            Controls.Add(frame);
+            ClientSize = client;
+            MinimumSize = SizeFromClientSize(new Size(minWidth, minHeight));
+            ResumeLayout(true);
+            resizable = true;
+
+            RestoreWindowPlacement();
+        }
+
+        void RestoreWindowPlacement()
+        {
+            Rectangle saved = new Rectangle(settings.WindowX, settings.WindowY, settings.WindowWidth, settings.WindowHeight);
+            if (saved.Width > 0)
+            {
+                Size = new Size(Math.Max(MinimumSize.Width, saved.Width), Math.Max(MinimumSize.Height, saved.Height));
+                // Only go back to the old position if the title bar would still be on a screen
+                // (a monitor may have been unplugged since).
+                var titleBar = new Rectangle(saved.X + 40, saved.Y, Math.Max(1, Width - 80), 30);
+                bool onScreen = false;
+                foreach (Screen s in Screen.AllScreens)
+                    if (s.WorkingArea.IntersectsWith(titleBar)) onScreen = true;
+                if (onScreen) Location = saved.Location;
+                else CenterOn(Screen.PrimaryScreen.WorkingArea);
+                if (settings.WindowMaximized) WindowState = FormWindowState.Maximized;
+                return;
+            }
+
+            // First run: the default size, made smaller if the screen isn't big enough.
+            Rectangle work = Screen.FromPoint(Cursor.Position).WorkingArea;
+            Size = new Size(Math.Max(MinimumSize.Width, Math.Min(Width, work.Width)),
+                            Math.Max(MinimumSize.Height, Math.Min(Height, work.Height)));
+            CenterOn(work);
+        }
+
+        void CenterOn(Rectangle area)
+        {
+            Location = new Point(area.Left + Math.Max(0, (area.Width - Width) / 2),
+                                 area.Top + Math.Max(0, (area.Height - Height) / 2));
+        }
+
+        void RememberWindowPlacement()
+        {
+            if (!resizable) return;
+            Rectangle b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            settings.WindowX = b.X;
+            settings.WindowY = b.Y;
+            settings.WindowWidth = b.Width;
+            settings.WindowHeight = b.Height;
+            settings.WindowMaximized = WindowState == FormWindowState.Maximized;
         }
 
         void UpdateRecordButton()
         {
             Theme t = Theme.Current;
+            trimSavedLink.Visible = !engine.IsRecording;
+            cancelLink.Visible = engine.IsRecording;
             if (engine.IsRecording)
             {
                 // Solid red while recording, in either theme.
@@ -879,32 +1191,53 @@ namespace SpeccyCapture
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
-            g.Clear(Theme.Current.PreviewBack);
+            Rectangle picture = PictureArea();
+            // Spare space around the picture (when the window's shape doesn't match it) takes the
+            // window's own colour; the preview's dark backing only goes behind the picture.
+            g.Clear(Theme.Current.Back);
+            using (var backing = new SolidBrush(Theme.Current.PreviewBack)) g.FillRectangle(backing, picture);
 
             if (ShowImage && HasFrame && Image != null)
             {
                 g.InterpolationMode = InterpolationMode.NearestNeighbor;
                 g.PixelOffsetMode = PixelOffsetMode.Half;
-                g.DrawImage(Image, ClientRectangle);
+                g.DrawImage(Image, picture);
             }
 
             if (!string.IsNullOrEmpty(Message))
             {
                 using (var brush = new SolidBrush(Color.FromArgb(175, 175, 175)))
                 using (var fmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                    g.DrawString(Message, Font, brush, ClientRectangle, fmt);
+                    g.DrawString(Message, Font, brush, picture, fmt);
             }
 
             if (Recording)
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 float s = g.DpiX / 96f;
-                var badge = new RectangleF(8 * s, 8 * s, 64 * s, 24 * s);
+                var badge = new RectangleF(picture.X + 8 * s, picture.Y + 8 * s, 64 * s, 24 * s);
                 using (var bg = new SolidBrush(Color.FromArgb(170, 0, 0, 0))) g.FillRectangle(bg, badge);
                 using (var red = new SolidBrush(Color.FromArgb(235, 40, 40))) g.FillEllipse(red, badge.X + 7 * s, badge.Y + 6 * s, 12 * s, 12 * s);
                 using (var font = new Font("Segoe UI", 9F, FontStyle.Bold))
                     g.DrawString("REC", font, Brushes.White, badge.X + 24 * s, badge.Y + 3 * s);
             }
+        }
+
+        // When filling its row, ask for nothing, so the layout gives the preview only the space
+        // the other rows leave (otherwise it holds on to its last size and pushes them off the bottom).
+        public override Size GetPreferredSize(Size proposedSize)
+        {
+            return Dock == DockStyle.Fill ? MinimumSize : base.GetPreferredSize(proposedSize);
+        }
+
+        // The largest rectangle with the picture's shape that fits, centred.
+        Rectangle PictureArea()
+        {
+            Rectangle r = ClientRectangle;
+            if (Image == null || r.Width <= 0 || r.Height <= 0) return r;
+            double scale = Math.Min((double)r.Width / Image.Width, (double)r.Height / Image.Height);
+            int w = (int)Math.Round(Image.Width * scale), h = (int)Math.Round(Image.Height * scale);
+            return new Rectangle(r.X + (r.Width - w) / 2, r.Y + (r.Height - h) / 2, w, h);
         }
     }
 }

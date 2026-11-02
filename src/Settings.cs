@@ -24,6 +24,9 @@ namespace SpeccyCapture
         public int Border = 0;        // pixels per side: 0, 16, 32 or 48
         public bool TrimBeforeSaving = true;
         public string Theme = "Match Windows";   // "Match Windows", "Light" or "Dark"
+        // Main window position and size (in screen pixels); width 0 = not saved yet.
+        public int WindowX, WindowY, WindowWidth, WindowHeight;
+        public bool WindowMaximized;
 
         const string FileName = "settings.ini";
 
@@ -112,12 +115,24 @@ namespace SpeccyCapture
             if (values.TryGetValue("Border", out v) && int.TryParse(v, out n)) Border = Array.IndexOf(Speccy.BorderSizes, n) >= 0 ? n : 0;
             if (values.TryGetValue("TrimBeforeSaving", out v)) TrimBeforeSaving = v == "1";
             if (values.TryGetValue("Theme", out v) && Array.IndexOf(SpeccyCapture.Theme.ModeNames, v) >= 0) Theme = v;
+            if (values.TryGetValue("Window", out v))
+            {
+                // x,y,width,height
+                string[] parts = v.Split(',');
+                int x, y, w, h;
+                if (parts.Length == 4 && int.TryParse(parts[0], out x) && int.TryParse(parts[1], out y) &&
+                    int.TryParse(parts[2], out w) && int.TryParse(parts[3], out h) && w > 0 && h > 0)
+                {
+                    WindowX = x; WindowY = y; WindowWidth = w; WindowHeight = h;
+                }
+            }
+            if (values.TryGetValue("WindowMaximized", out v)) WindowMaximized = v == "1";
         }
 
         // Returns true if saved in the app folder, false if it had to use AppData (or failed).
         public bool Save()
         {
-            string[] lines =
+            var lines = new List<string>
             {
                 "; Speccy Game Capture O-MATIC settings. Paths without a drive letter are relative to this folder.",
                 "Emulator=" + Emulator,
@@ -135,6 +150,11 @@ namespace SpeccyCapture
                 "TrimBeforeSaving=" + (TrimBeforeSaving ? "1" : "0"),
                 "Theme=" + Theme,
             };
+            if (WindowWidth > 0)
+            {
+                lines.Add("Window=" + WindowX + "," + WindowY + "," + WindowWidth + "," + WindowHeight);
+                lines.Add("WindowMaximized=" + (WindowMaximized ? "1" : "0"));
+            }
             try
             {
                 File.WriteAllLines(PortablePath, lines);

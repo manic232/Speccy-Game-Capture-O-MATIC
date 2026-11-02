@@ -151,6 +151,7 @@ namespace SpeccyCapture
             {
                 if (c is Button) StyleButton((Button)c, t);
                 else if (c is TextBox) StyleTextBox((TextBox)c, t);
+                else if (c is FieldBox) ((FieldBox)c).ApplyTheme(t);
                 else if (c is ComboBox) StyleCombo((ComboBox)c, t);
                 else if (c is CheckBox) StyleCheckBox((CheckBox)c, t);
                 else if (c is LinkLabel) StyleLink((LinkLabel)c, t);
@@ -252,6 +253,79 @@ namespace SpeccyCapture
         }
     }
 
+    // Single-line text field the same height as the drop-downs, with its text vertically
+    // centred and indented to line up with theirs. A plain TextBox can do neither, so this
+    // draws the frame itself and holds a borderless TextBox inside.
+    sealed class FieldBox : Control
+    {
+        public readonly TextBox Box;
+        float dpi = 1f;
+
+        public FieldBox()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint |
+                     ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+            Box = new TextBox { BorderStyle = BorderStyle.None, Tag = "custom" };
+            Box.GotFocus += delegate { Invalidate(); };
+            Box.LostFocus += delegate { Invalidate(); };
+            Controls.Add(Box);
+            Cursor = Cursors.IBeam;
+            Height = 26;
+        }
+
+        public override string Text
+        {
+            get { return Box.Text; }
+            set { Box.Text = value; }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            using (Graphics g = CreateGraphics()) dpi = g.DpiX / 96f;
+            PerformLayout();
+        }
+
+        protected override void OnFontChanged(EventArgs e)
+        {
+            base.OnFontChanged(e);
+            PerformLayout();
+        }
+
+        protected override void OnLayout(LayoutEventArgs e)
+        {
+            base.OnLayout(e);
+            // Text starts at the same x, and sits on the same line, as ThemedComboBox's text
+            // (measured from screenshots: 9 px in, and half a pixel below centre).
+            int indent = (int)Math.Round(9 * dpi);
+            int top = (Height - Box.Height + (int)Math.Round(2 * dpi)) / 2;
+            Box.SetBounds(indent, top, Math.Max(1, Width - indent - (int)Math.Round(4 * dpi)), Box.Height);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            Box.Focus();
+        }
+
+        public void ApplyTheme(Theme t)
+        {
+            Box.BackColor = t.IsDark ? t.Surface : SystemColors.Window;
+            Box.ForeColor = t.IsDark ? t.Text : SystemColors.WindowText;
+            Invalidate();
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Theme t = Theme.Current;
+            e.Graphics.Clear(t.IsDark ? t.Surface : SystemColors.Window);
+            Color border = Box.Focused
+                ? (t.IsDark ? Color.FromArgb(170, 170, 170) : Color.FromArgb(0, 120, 215))
+                : (t.IsDark ? t.Border : Color.FromArgb(141, 141, 141)); // light: the drop-downs' grey
+            using (var pen = new Pen(border)) e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+        }
+    }
+
     // Drop-down list whose arrow button follows the theme. In dark mode Windows still
     // draws a white arrow strip, so we paint our own button and border on top of it.
     sealed class ThemedComboBox : ComboBox
@@ -269,6 +343,7 @@ namespace SpeccyCapture
             if (m.Msg == WM_PAINT && Theme.Current.IsDark) PaintDarkChrome();
         }
 
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
         protected override void OnDropDown(EventArgs e) { base.OnDropDown(e); Invalidate(); }
         protected override void OnDropDownClosed(EventArgs e) { base.OnDropDownClosed(e); Invalidate(); }
 
@@ -280,7 +355,24 @@ namespace SpeccyCapture
                 Rectangle r = ClientRectangle;
                 int buttonWidth = SystemInformation.HorizontalScrollBarArrowWidth + 4;
                 var button = new Rectangle(r.Right - buttonWidth, r.Top, buttonWidth, r.Height);
-                using (var back = new SolidBrush(DroppedDown ? t.SurfacePressed : t.Surface)) g.FillRectangle(back, button);
+
+                if (!Enabled)
+                {
+                    // Windows draws a greyed-out drop-down in light colours (a white frame), so
+                    // paint the whole thing: dark box, dimmed text, dimmed arrow.
+                    using (var back = new SolidBrush(t.Back)) g.FillRectangle(back, r);
+                    if (SelectedIndex >= 0)
+                    {
+                        // Same text position as the enabled box (DrawComboItem's edit area).
+                        var text = new Rectangle(r.Left + 6, r.Top, r.Width - buttonWidth - 9, r.Height);
+                        TextRenderer.DrawText(g, Items[SelectedIndex].ToString(), Font, text, t.DimText,
+                            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                    }
+                }
+                else
+                {
+                    using (var back = new SolidBrush(DroppedDown ? t.SurfacePressed : t.Surface)) g.FillRectangle(back, button);
+                }
 
                 // Small down-pointing arrow
                 float cx = button.Left + button.Width / 2f, cy = button.Top + button.Height / 2f;

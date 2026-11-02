@@ -7,7 +7,7 @@ if not exist "%CSC%" set CSC=%WINDIR%\Microsoft.NET\Framework\v4.0.30319\csc.exe
 
 "%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ ^
   /win32icon:assets\app.ico ^
-  /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Management.dll ^
+  /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:System.Management.dll /r:Microsoft.VisualBasic.dll ^
   /out:"Speccy Game Capture O-MATIC.exe" src\*.cs
 if errorlevel 1 (
   echo.
