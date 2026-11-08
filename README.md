@@ -4,6 +4,12 @@ Records your ZX Spectrum gameplay in **Spectaculator** or **Fuse** as an animate
 the Spectrum's real resolution (256 × 192), with no emulator window, menus or display
 filters in the picture. The border can be included if you want it.
 
+<p align="center">
+  <img src="images/main-dark.jpg" width="45%" alt="Main window in dark mode">
+  &nbsp;
+  <img src="images/main-light.jpg" width="45%" alt="Main window in light mode">
+</p>
+
 ## Download
 
 Get the latest zip from the [Releases page](https://github.com/manic232/Speccy-Game-Capture-O-MATIC/releases/latest)
@@ -71,6 +77,12 @@ Everything stays in the app's own folder. Nothing goes in the registry or AppDat
 
 When you stop recording, the clip opens in the trim window so you can cut the dead
 bits off the start and end.
+
+<p align="center">
+  <img src="images/edit-dark.jpg" width="45%" alt="Trim window in dark mode">
+  &nbsp;
+  <img src="images/edit-light.jpg" width="45%" alt="Trim window in light mode">
+</p>
 
 - **Drag the blue handles** on the timeline to set the start and end. Grey parts are cut.
 - **Click anywhere on the timeline** to view that frame. The red marker is the playhead.
@@ -177,7 +189,8 @@ build.cmd
 - `src/TrimForm.cs`: the trim window and timeline
 - `src/Theme.cs`: light/dark colour schemes, themed drop-downs, progress bar and prompts
 - `src/MainForm.cs`: the main window, preview and hotkey
-- `tools/make-icon.ps1`: regenerates `assets/app.ico`
+- `assets/app.ico`: the app's icon
+- `images/`: the screenshots on this page
 
 ## Licence
 
